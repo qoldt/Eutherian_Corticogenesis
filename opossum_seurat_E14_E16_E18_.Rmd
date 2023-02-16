@@ -1,0 +1,454 @@
+---
+title: "scRNAseq_seurat"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r install}
+#SETPROXY
+Sys.setenv("http_proxy" = "http://proxy.charite.de:8080")
+Sys.setenv("https_proxy" = "https://proxy.charite.de:8080")
+library(httr)    
+set_config(use_proxy(url="http://proxy/charite.de",port=8080))
+#UNSET
+# Sys.setenv("http_proxy" = "")
+# Sys.setenv("https_proxy" = "")
+# BiocManager::install("Seurat")
+# BiocManager::install("patchwork")
+# BiocManager::install("glmGamPoi")
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(glmGamPoi)
+library(future)
+library(ggplot2)
+library(DoubletFinder)
+set.seed(42)
+
+# Set parallelization
+plan("multisession") #sets parallelization from future package without arguments takes all available cores. can specify with workers = "6" 
+
+plotdir <- "plots"
+dir.create(plotdir)
+
+
+```
+
+
+
+```{r load}
+
+work_dir <- "~/My Drive/Bench/Opossum/scRNAseq/scRNAseq_out_inc_introns/"
+setwd(work_dir)
+
+# E14 E15 and E16 mouse data taken from DiBella 2021: ncbi.nlm.nih.gov/geo/query/acc.cg?acc=GSE153164
+
+mouse_E14 <- Read10X(data.dir= paste0(work_dir, "mouseE14/outs/raw_feature_bc_matrix/")) # SRR12082758
+#mouse_E15 <- Read10X(data.dir= paste0(work_dir, "mouseE15/outs/raw_feature_bc_matrix/")) # SRR12082760
+mouse_E16 <- Read10X(data.dir= paste0(work_dir, "mouseE16/outs/raw_feature_bc_matrix/")) # SRR12082760
+mouse_E18 <- Read10X(data.dir= paste0(work_dir, "mouseE18_AN/outs/raw_feature_bc_matrix/")) # This Study
+
+opossum_P10<- Read10X(data.dir= paste0(work_dir, "opossumP10/outs/raw_feature_bc_matrix/")) # This study
+opossum_P17 <- Read10X(data.dir= paste0(work_dir, "opossumP17/outs/raw_feature_bc_matrix/")) # This study
+opossum_P21 <- Read10X(data.dir= paste0(work_dir, "opossumP21/outs/raw_feature_bc_matrix/")) # This study
+
+
+# function to convert Opossum gene names to Mouse gene names. Requires libraries biomaRt and stringi
+convert_opossum_gene_id <- function(opossum_geneids){
+  sample_name <- deparse(substitute(opossum_geneids))
+  ids <- sapply(opossum_geneids@Dimnames[[1]], paste, collapse=", ")
+  library(biomaRt)
+  ensembl.opossum <- useMart("ensembl", dataset="mdomestica_gene_ensembl")
+  ID_query_attributes <- c("ensembl_gene_id","mmusculus_homolog_associated_gene_name","external_gene_name")
+  ID_query_filters <- "ensembl_gene_id"
+  new.ids <- getBM(attributes = ID_query_attributes,
+                 filters = ID_query_filters,
+                 values = ids,
+                 mart = ensembl.opossum)
+  new.ids$mmusculus_homolog_associated_gene_name[new.ids$mmusculus_homolog_associated_gene_name == ''] <-  as.character(new.ids$ensembl_gene_id[new.ids$mmusculus_homolog_associated_gene_name == ''])
+  library(stringi)
+  opossum_geneids@Dimnames[[1]] <- stri_replace_all_regex(opossum_geneids@Dimnames[[1]], new.ids$ensembl_gene_id, new.ids$mmusculus_homolog_associated_gene_name, vectorize_all=FALSE)
+  opossum_geneids@Dimnames[[1]] <- toupper(opossum_geneids@Dimnames[[1]])
+  assign(sample_name, opossum_geneids, envir = .GlobalEnv)
+  print(paste("Gene names converted for", sample_name))
+}
+
+
+convert_opossum_gene_id(opossum_P10)
+convert_opossum_gene_id(opossum_P17)
+convert_opossum_gene_id(opossum_P21)
+
+opossum_P10 <- CreateSeuratObject(counts = opossum_P10, names.field = c(1,2), min.cells = 3, min.features = 200, project = "opossum_P10")
+opossum_P10 <- AddMetaData(opossum_P10, metadata = "Opossum", col.name = "Species")
+opossum_P10  <- AddMetaData(opossum_P10, metadata = "Opossum P10", col.name = "Stage")
+opossum_P17 <- CreateSeuratObject(counts = opossum_P17, names.field = c(1,2), min.cells = 3, min.features = 200, project = "opossum_P17")
+opossum_P17 <- AddMetaData(opossum_P17, metadata = "Opossum", col.name = "Species")
+opossum_P17  <- AddMetaData(opossum_P17, metadata = "Opossum P17", col.name = "Stage")
+opossum_P21 <- CreateSeuratObject(counts = opossum_P21,  names.field = c(1,2), min.cells = 3, min.features = 200, project = "opossum_P21")
+opossum_P21 <- AddMetaData(opossum_P21, metadata = "Opossum", col.name = "Species")
+opossum_P21  <- AddMetaData(opossum_P21, metadata = "Opossum P21", col.name = "Stage")
+
+gene_upper <- function(data) {
+  sample_name <- deparse(substitute(data))
+  data@Dimnames[[1]] <- toupper(data@Dimnames[[1]])
+  assign(sample_name, data, envir = .GlobalEnv)
+  print(paste(sample_name, "gene names converted to uppercase"))
+}
+
+gene_upper(mouse_E14)
+#gene_upper(mouse_E15)
+gene_upper(mouse_E16)
+gene_upper(mouse_E18)
+
+mouse_E14 <- CreateSeuratObject(counts = mouse_E14,  names.field = c(1,2), min.cells = 3, min.features = 200)
+mouse_E14  <- AddMetaData(mouse_E14, metadata = "Mouse", col.name = "Species")
+mouse_E14  <- AddMetaData(mouse_E14, metadata = "Mouse E14", col.name = "Stage")
+
+# mouse_E15 <- CreateSeuratObject(counts = mouse_E15,  names.field = c(1,2), min.cells = 3, min.features = 200)
+# mouse_E15  <- AddMetaData(mouse_E15, metadata = "Mouse", col.name = "Species")
+# mouse_E15  <- AddMetaData(mouse_E15, metadata = "Mouse E15", col.name = "Stage")
+
+mouse_E16 <- CreateSeuratObject(counts = mouse_E16,  names.field = c(1,2), min.cells = 3, min.features = 200)
+mouse_E16 <- AddMetaData(mouse_E16, metadata = "Mouse", col.name = "Species")
+mouse_E16  <- AddMetaData(mouse_E16, metadata = "Mouse E16", col.name = "Stage")
+
+mouse_E18 <- CreateSeuratObject(counts = mouse_E18,  names.field = c(1,2), min.cells = 3, min.features = 200)
+mouse_E18 <- AddMetaData(mouse_E18, metadata = "Mouse", col.name = "Species")
+mouse_E18  <- AddMetaData(mouse_E18, metadata = "Mouse E18", col.name = "Stage")
+
+
+```
+
+
+```{r QC_and_filtering}
+
+opossum_P10[["percent.mt"]]  <- PercentageFeatureSet(opossum_P10, pattern = "^MT-")
+opossum_P17[["percent.mt"]]  <- PercentageFeatureSet(opossum_P17, pattern = "^MT-")
+opossum_P21[["percent.mt"]]  <- PercentageFeatureSet(opossum_P21, pattern = "^MT-")
+opossum_P10[["percent.rbp"]] <- PercentageFeatureSet(opossum_P10, pattern = "^RP[SL]")
+opossum_P17[["percent.rbp"]] <- PercentageFeatureSet(opossum_P17, pattern = "^RP[SL]")
+opossum_P21[["percent.rbp"]] <- PercentageFeatureSet(opossum_P21, pattern = "^RP[SL]")
+mouse_E14[["percent.mt"]]  <- PercentageFeatureSet(mouse_E14, pattern = "^MT-")
+#mouse_E15[["percent.mt"]]  <- PercentageFeatureSet(mouse_E15, pattern = "^MT-")
+mouse_E16[["percent.mt"]]  <- PercentageFeatureSet(mouse_E16, pattern = "^MT-")
+mouse_E18[["percent.mt"]]  <- PercentageFeatureSet(mouse_E18, pattern = "^MT-")
+mouse_E14[["percent.rbp"]] <- PercentageFeatureSet(mouse_E14, pattern = "^RP[SL]")
+#mouse_E15[["percent.rbp"]] <- PercentageFeatureSet(mouse_E14, pattern = "^RP[SL]")
+mouse_E16[["percent.rbp"]] <- PercentageFeatureSet(mouse_E16, pattern = "^RP[SL]")
+mouse_E18[["percent.rbp"]] <- PercentageFeatureSet(mouse_E18, pattern = "^RP[SL]")
+
+
+plotdir <- "plots/QC"
+dir.create(plotdir)
+
+VlnPlot(opossum_P10, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Opossum_P10_pre-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Opossum_P10_pre-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(opossum_P17, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Opossum_P17_pre-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Opossum_P17_pre-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(opossum_P21, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Opossum_P21_pre-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Opossum_P21_pre-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(mouse_E14, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Mouse_E14_pre-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Mouse_E14_pre-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+# VlnPlot(mouse_E15, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+# ggsave(paste0(plotdir, "/", "QC_Mouse_E15_pre-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+# ggsave(paste0(plotdir, "/", "QC_Mouse_E15_pre-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(mouse_E16, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Mouse_E16_pre-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Mouse_E16_pre-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(mouse_E18, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Mouse_E18_pre-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Mouse_E18_pre-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+opossum_P10 <- subset(opossum_P10, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & percent.mt < 5)
+opossum_P17 <- subset(opossum_P17, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & percent.mt < 5)
+opossum_P21 <- subset(opossum_P21, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & percent.mt < 5)
+mouse_E14 <- subset(mouse_E14, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & percent.mt < 5)
+#mouse_E15 <- subset(mouse_E15, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & percent.mt < 5)
+mouse_E16 <- subset(mouse_E16, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & percent.mt < 5)
+mouse_E18 <- subset(mouse_E18, subset = nFeature_RNA > 1000 & nFeature_RNA < 5000 & percent.mt < 5)
+
+VlnPlot(opossum_P10, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Opossum_P10_post-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Opossum_P10_post-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(opossum_P17, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Opossum_P17_post-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Opossum_P17_post-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(opossum_P21, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Opossum_P21_post-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Opossum_P21_post-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(mouse_E14, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Mouse_E14_post-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Mouse_E14_post-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+# VlnPlot(mouse_E15, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+# ggsave(paste0(plotdir, "/", "QC_Mouse_E15_post-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+# ggsave(paste0(plotdir, "/", "QC_Mouse_E15_post-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(mouse_E16, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Mouse_E16_post-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Mouse_E16_post-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+VlnPlot(mouse_E18, features = c("nFeature_RNA","nCount_RNA","percent.mt","percent.rbp"), ncol = 4)
+ggsave(paste0(plotdir, "/", "QC_Mouse_E18_post-filter.pdf"), plot = last_plot(), width = 20, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", "QC_Mouse_E18_post-filter.png"), plot = last_plot(), width = 20, height = 18, units = "cm")
+
+
+```
+
+
+```{r integration_sctransform}
+
+sc_list <- list()
+sc_list[["Opossum_ctx_P10"]] <- opossum_P10
+sc_list[["Opossum_ctx_P17"]] <- opossum_P17
+sc_list[["Opossum_ctx_P21"]] <- opossum_P21
+sc_list[["Mouse_ctx_E14"]] <- mouse_E14
+#sc_list[["Mouse_ctx_E15"]] <- mouse_E15
+sc_list[["Mouse_ctx_E16"]] <- mouse_E16
+sc_list[["Mouse_ctx_E18"]] <- mouse_E18
+
+library(glmGamPoi)
+plan("sequential")
+
+sc_list <- lapply(X = sc_list, FUN = SCTransform, method = "glmGamPoi")
+features <- SelectIntegrationFeatures(object.list = sc_list, nfeatures = 3000)
+
+sc_list <- PrepSCTIntegration(object.list = sc_list, anchor.features = features)
+
+plan("multicore")
+options(future.globals.maxSize = 4000 * 1024^5)
+
+
+sc.anchors <- FindIntegrationAnchors(object.list = sc_list, normalization.method = "SCT", anchor.features = features) #takes a long time
+rm(list=c("mouse_E14",#"mouse_E15", 
+  "mouse_E16","mouse_E18","opossum_P10","opossum_P17","opossum_P21"))
+rm(sc_list)
+
+sc_seurat.sct <- IntegrateData(anchorset = sc.anchors, normalization.method = "SCT")
+rm(sc.anchors)
+
+#Run standard workflow
+sc_seurat.sct <- RunPCA(sc_seurat.sct, npcs = 30, verbose = F) %>%
+  RunUMAP(reduction = "pca", dims = 1:30, verbose = F) %>%
+  FindNeighbors(dims = 1:20, k.param = 10, verbose = F) %>%
+  FindClusters(algorithm = 1, resolution = 0.3, verbose = F)
+
+#Stage needs to be a factor for later plots to display correctly
+sc_seurat.sct@meta.data$Stage <- factor(sc_seurat.sct@meta.data$Stage, levels = c("Mouse E14","Mouse E16","Mouse E18","Opossum P10","Opossum P17","Opossum P21")) 
+
+saveRDS(sc_seurat.sct, file="sc_seurat_E14_E16_E18.sct.rds")
+
+```
+
+
+
+
+```{r clustering}
+
+
+DefaultAssay(sc_seurat.sct) <- "SCT"
+
+FeaturePlot(sc_seurat.sct, features = "nFeature_RNA") # check that no clusters are grouped by RNA count
+
+
+```
+
+
+
+```{r data_exploration}
+
+DimPlot(sc_seurat.sct,label = T) + NoLegend()
+DimPlot(sc_seurat.sct, reduction = "umap")
+DimPlot(sc_seurat.sct, reduction = "umap", split.by = "Stage")
+DimPlot(sc_seurat.sct, reduction = "umap", split.by = "Species") 
+
+
+```
+
+```{r rename_clusters}
+# Identify clusters based on marker genes and rename clusters appropriately
+
+
+
+plan("multisession")
+DefaultAssay(sc_seurat.sct) <- "SCT"
+sc_seurat.sct <- PrepSCTFindMarkers(sc_seurat.sct)
+sc.markers <- FindAllMarkers(sc_seurat.sct, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+write.table(sc.markers, file ="mouse_opossum_all_cells_markers.csv", sep = ",", quote = FALSE, row.names = FALSE)
+sc.markers %>%
+    group_by(cluster) %>%
+    slice_max(n = 20, order_by = avg_log2FC)
+
+Idents(sc_seurat.sct) <- "seurat_clusters"
+sc_seurat.sct <- RenameIdents(sc_seurat.sct, `0` = "UL Neurons I", `1` = "DL Neurons", `2` = "LHX6 Interneurons I", `3`="Basal Progenitors II",`4` = "UL Neurons II", `5` = "Midbrain",`6` = "Hippocampus I", `7` = "Apical Progenitors II", `8` = "ADARB2 Interneurons II",  `9` = "Apical Progenitors I", `10` = "Basal Progenitors I", `11` = "EBF1 Interneurons III", `12`="Hippocampus II", `13`= "DCBLD2 Interneurons IV", `14` = "ISL1 Interneurons V",`15`= "TRHDE Interneurons VI", `16`= "Oligodendrocytes", `17`= "Microglia",`18`="PIEZO2 Neurons", `19`="Layer I", `20`= "TMSB4X Neurons")
+
+Idents(sc_seurat.sct) <- factor(Idents(sc_seurat.sct), levels= c("Apical Progenitors I",
+                                                                 "Apical Progenitors II", 
+                                                                 "Basal Progenitors I",
+                                                                 "Basal Progenitors II", 
+                                                                 "Hippocampus I",
+                                                                 "Hippocampus II", 
+                                                                 "UL Neurons I", 
+                                                                 "UL Neurons II", 
+                                                                 "DL Neurons",
+                                                                 "PIEZO2 Neurons",
+                                                                 "Midbrain",
+                                                                 "LHX6 Interneurons I",
+                                                                 "ADARB2 Interneurons II",
+                                                                 "EBF1 Interneurons III", 
+                                                                 "DCBLD2 Interneurons IV",
+                                                                 "ISL1 Interneurons V",
+                                                                 "TRHDE Interneurons VI",
+                                                                 "Layer I",
+                                                                 "Oligodendrocytes",
+                                                                 "Microglia",
+                                                                 "TMSB4X Neurons"))
+
+
+library(ggplot2)
+DimPlot(sc_seurat.sct, label = T, repel = T, reduction = "umap")+
+  NoLegend() + 
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1") +
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", "All_clusters_E14_E16_E18_P10_P17_P21_umap_name.pdf"), plot = last_plot(), width = 18, height = 18, units = "cm")
+
+
+
+
+saveRDS(sc_seurat.sct, file="sc_seurat_E14_E16_E18.sct.rds")
+
+
+```
+Can run scanpy plotting inside R https://scanpy.readthedocs.io/en/stable/tutorials.html#conversion-anndata-singlecellexperiment-and-seurat-objects
+Must first convert seurat object to AnnData
+
+Then read Anndata (.h5ad) into jupyter notebook.
+
+
+```{r recluster}
+
+sc_seurat.PN.sct <- subset(sc_seurat.sct, idents = c("Apical Progenitors I","Apical Progenitors II", "Basal Progenitors I","Basal Progenitors II", "Hippocampus I","Hippocampus II", "UL Neurons I", "UL Neurons II", "DL Neurons","PIEZO2 Neurons"))
+rm(sc_seurat.sct)
+rm(sc.markers)
+
+plan("multicore")
+DimPlot(sc_seurat.PN.sct, label = T, reduction = "umap")
+DefaultAssay(sc_seurat.PN.sct) <- "RNA"
+
+sc_seurat.PN.sct <- DietSeurat(sc_seurat.PN.sct, assays = "RNA")
+
+sc_seurat.PN.sct.list <- SplitObject(object = sc_seurat.PN.sct, split.by = "Stage")
+rm(sc_seurat.PN.sct)
+options(future.globals.maxSize = 4000 * 1024^5)
+sc_seurat.PN.sct.list <- lapply(X = sc_seurat.PN.sct.list, FUN = SCTransform)
+
+sc_seurat.PN.sct.features <- SelectIntegrationFeatures(object.list = sc_seurat.PN.sct.list, nfeatures = 3000)
+sc_seurat.PN.sct.list <- PrepSCTIntegration(object.list = sc_seurat.PN.sct.list, anchor.features = sc_seurat.PN.sct.features,
+verbose = FALSE)
+sc_seurat.PN.sct.anchors <- FindIntegrationAnchors(object.list = sc_seurat.PN.sct.list, normalization.method = "SCT",
+anchor.features = sc_seurat.PN.sct.features, verbose = FALSE)
+
+sc_seurat.PN.sct <- IntegrateData(anchorset = sc_seurat.PN.sct.anchors, normalization.method = "SCT", verbose = FALSE)
+rm(sc_seurat.PN.sct.list)
+rm(sc_seurat.PN.sct.anchors)
+
+resolution_param <- 0.3
+
+sc_seurat.PN.sct <- RunPCA(sc_seurat.PN.sct, verbose = FALSE) %>%
+  RunUMAP( dims = 1:30) %>%
+  FindNeighbors( dims = 1:20, k.param = 10, verbose = F) %>%
+  FindClusters(algorithm = 1, resolution = resolution_param, verbose = F)
+
+#Remove cluster 13, which comprises a few remaining interneurons
+sc_seurat.PN.sct <- subset(sc_seurat.PN.sct, idents = 13, invert=TRUE)
+
+resolution_param <- 0.3
+sc_seurat.PN.sct <- RunPCA(sc_seurat.PN.sct, verbose = FALSE) %>%
+  RunUMAP( dims = 1:35 , n.neighbors = 25) %>%
+  FindNeighbors( dims = 1:30, k.param = 10, verbose = F) %>%
+  FindClusters(algorithm = 1, resolution = resolution_param, verbose = F)
+
+plotdir <- "plots/Pyramid_Subset"
+dir.create(plotdir)
+DEdir <- "DE"
+dir.create(DEdir)
+prefix <- "PN_subset"
+
+library(ggplot2)
+DimPlot(sc_seurat.PN.sct, label = T, reduction = "umap")+
+  NoLegend() +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_umap_res_", resolution_param,".pdf"), plot = last_plot(), width = 18, height = 18, units = "cm")
+  
+DimPlot(sc_seurat.PN.sct, reduction = "umap", split.by = "Stage") + 
+  NoLegend() +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_sample_split_umap_", resolution_param,".pdf"), plot = last_plot(), width = 40, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_sample_split_umap_", resolution_param,".png"), plot = last_plot(), width = 40, height = 18, units = "cm")
+
+DimPlot(sc_seurat.PN.sct, reduction = "umap", split.by = "Species") + 
+  NoLegend() +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_species_split_umap_", resolution_param,".pdf"), plot = last_plot(), width = 40, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_species_split_umap_", resolution_param,".png"), plot = last_plot(), width = 40, height = 18, units = "cm")
+
+
+
+```
+
+```{r subsetmarkers}
+sc_seurat.PN.sct <- PrepSCTFindMarkers(sc_seurat.PN.sct)
+sc.markers <- FindAllMarkers(sc_seurat.PN.sct, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+write.table(sc.markers, file =paste0(plotdir, "/","all_cluster_markers_PN_subset_res_", resolution_param, ".csv"), sep = ",", quote = FALSE, row.names = FALSE)
+sc.markers %>%
+    group_by(cluster) %>%
+    slice_max(n = 20, order_by = avg_log2FC)
+
+sc_seurat.PN.sct <- RenameIdents(sc_seurat.PN.sct, `0` =  "Immature Neurons", `1` ="Layer VI", `2` = "Layer V",`3` = "Layer II/III",  `4` = "Layer IV", `5` = "Apical Progenitors III", `6` = "Apical Progenitors I", `7` = "Apical Progenitors II", `8` = "CA3", `9` = "Basal Progenitors", `10` = "CA1 & DG", `11`="Subiculum", `12`= "DL HS3ST2",`13`="PIEZO2")
+
+#set factor levels so clusters are easily distinguished
+Idents(sc_seurat.PN.sct) <- factor(Idents(sc_seurat.PN.sct), levels = c("Apical Progenitors I", 
+                                                                        "Apical Progenitors II", 
+                                                                        "Apical Progenitors III", 
+                                                                        "Basal Progenitors",
+                                                                        "Immature Neurons",
+                                                                        "Layer II/III",
+                                                                        "Layer IV",
+                                                                        "Layer V", 
+                                                                        "Layer VI",
+                                                                        "DL HS3ST2",
+                                                                        "PIEZO2",
+                                                                        "Subiculum",
+                                                                        "CA1 & DG",
+                                                                        "CA3"))
+
+saveRDS(sc_seurat.PN.sct, file = "sc_seurat.PN.sct.rds")
+```
+
+
+
