@@ -421,6 +421,11 @@ ggsave(paste0(plotdir, "/", prefix, "_Cluster_species_split_umap_", resolution_p
 
 ```
 
+
+This code chunk will do something
+
+
+
 ```{r subsetmarkers}
 sc_seurat.PN.sct <- PrepSCTFindMarkers(sc_seurat.PN.sct)
 sc.markers <- FindAllMarkers(sc_seurat.PN.sct, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
@@ -430,6 +435,9 @@ sc.markers %>%
     slice_max(n = 20, order_by = avg_log2FC)
 
 sc_seurat.PN.sct <- RenameIdents(sc_seurat.PN.sct, `0` =  "Immature Neurons", `1` ="Layer VI", `2` = "Layer V",`3` = "Layer II/III",  `4` = "Layer IV", `5` = "Apical Progenitors III", `6` = "Apical Progenitors I", `7` = "Apical Progenitors II", `8` = "CA3", `9` = "Basal Progenitors", `10` = "CA1 & DG", `11`="Subiculum", `12`= "DL HS3ST2",`13`="PIEZO2")
+
+
+
 
 #set factor levels so clusters are easily distinguished
 Idents(sc_seurat.PN.sct) <- factor(Idents(sc_seurat.PN.sct), levels = c("Apical Progenitors I", 
