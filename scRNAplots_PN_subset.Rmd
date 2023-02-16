@@ -1,0 +1,465 @@
+---
+title: "scPlotting"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r load}
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(glmGamPoi)
+library(future)
+setwd("~/Google Drive/My Drive/Bench/Opossum/scRNAseq/")
+sc_seurat.sct <- readRDS("sc_seurat.PN.sct.rds")
+sc.markers <- read.csv("all_cluster_markers_PN_subset_res_0.3.csv", header = TRUE, sep=",")
+#sc_seurat.sct <- sc_seurat.PN.sct
+
+sc_seurat.sct$Stage <- factor(sc_seurat.sct$Stage, levels = c("Mouse E14","Mouse E16", "Mouse E18","Opossum P10","Opossum P17", "Opossum P21"))
+
+plotdir <- "plots/Pyramid_Subset"
+dir.create(plotdir)
+DEdir <- "DE"
+dir.create(DEdir)
+prefix <- "PN_subset"
+
+top3_percluster <- sc.markers  %>% group_by(cluster) %>% slice_max(n = 3, order_by = avg_log2FC)
+top3_percluster <- unique(top3_percluster$gene)
+
+top10_percluster <- sc.markers  %>% group_by(cluster) %>% slice_max(n = 10, order_by = avg_log2FC)
+top10_percluster <- unique(top10_percluster$gene)
+
+top20_percluster <- sc.markers  %>% group_by(cluster) %>% slice_max(n = 20, order_by = avg_log2FC)
+top20_percluster <- unique(top20_percluster$gene)
+
+DoHeatmap(sc_seurat.sct,  features = top20_percluster ) + NoLegend()
+ggsave(paste0(plotdir, "/",  prefix, "_clusters_top20_heatmap.pdf"), plot = last_plot(), width = 40, height = 50, units = "cm")
+
+```
+
+
+
+
+```{r functions}
+
+remove_underscores <- function(string) {
+  new.string <- gsub("_"," ", string)
+  paste(new.string)
+}
+
+Layout<-"
+ABC
+DEF
+"
+
+#Modified from https://divingintogeneticsandgenomics.rbind.io/post/customize-featureplot-in-seurat-for-multi-condition-comparisons-using-patchwork/
+FeaturePlotSingle<- function(obj, feature, metadata_column, ...){
+  all_cells<- colnames(obj)
+  groups<- levels(obj@meta.data[, metadata_column])
+  
+  # the minimal and maximal of the value to make the legend scale the same. 
+  minimal<- min(obj[['SCT']]@data[feature, ])
+  maximal<- max(obj[['SCT']]@data[feature, ])
+  ps<- list()
+  for (group in groups) {
+    subset_indx<- obj@meta.data[, metadata_column] == group
+    subset_cells<- all_cells[subset_indx]
+    p<- FeaturePlot(obj, features = feature, cells= subset_cells, coord.fixed = TRUE, pt.size = 0.1, ...) +
+      scale_color_viridis_c(limits=c(minimal, maximal), direction = -1, option = "magma")+
+      ggtitle(remove_underscores(group)) +
+      xlab("UMAP 1")+
+      ylab("UMAP 2")+
+      labs(color = feature)+
+      theme(plot.title = element_text(size = 14, face = "bold"))
+    ps[[group]]<- p
+  }
+  
+  
+  return(ps)
+}
+
+OutputFeatureBySample <- function(gene){
+  feature.list <- FeaturePlotSingle(obj = sc_seurat.sct,
+                                    feature = gene,
+                                    metadata_column = "Stage",
+                                    order = TRUE)
+  tmp <- wrap_plots(feature.list, guides = 'collect', design = Layout)
+  ggsave(paste0(plotdir, "/", gene, "_sample_exp.pdf"), plot = tmp, width = 35, height = 25, units = "cm")
+  ggsave(paste0(plotdir, "/", gene, "_sample_exp.png"), plot = tmp, width = 35, height = 25, units = "cm")
+  print(paste("Plots output for ", gene, " expression split by sample"))
+}
+
+OutputFeatureBySpecies <- function(gene){
+  FeaturePlot(sc_seurat.sct, feature = gene, coord.fixed = TRUE, order = TRUE, split.by = "Species") +
+    xlab("UMAP 1")+
+    ylab("UMAP 2")
+  ggsave(paste0(plotdir, "/", gene, "_species_exp.pdf"), plot = last_plot(), width = 35, height = 18, units = "cm")
+  ggsave(paste0(plotdir, "/", gene, "_species_exp.png"), plot = last_plot(), width = 35, height = 18, units = "cm")
+  print(paste("Plots output for ", gene, " expression split by species"))
+}
+
+
+SampleClusterPlot<- function(obj,  metadata_column, ...){
+  all_cells<- colnames(obj)
+  groups<- levels(obj@meta.data[, metadata_column])
+  
+  ps<- list()
+  for (group in groups) {
+    subset_indx<- obj@meta.data[, metadata_column] == group
+    subset_cells<- all_cells[subset_indx]
+    p<- DimPlot(obj, cells= subset_cells,  pt.size = 0.1, ...) +
+      coord_fixed(ratio =1) +
+      ggtitle(remove_underscores(group)) +
+      xlab("UMAP 1")+
+      ylab("UMAP 2")+
+      theme(plot.title = element_text(size = 14, face = "bold"))
+    ps[[group]]<- p
+  }
+  
+  
+  return(ps)
+}
+
+
+
+
+```
+
+
+
+```{r embedding_plots}
+
+# SCtransform embedding coloured by clusters
+DimPlot(sc_seurat.sct,label = T, repel = TRUE) + 
+  NoLegend() +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix,"_Cluster_umap.pdf"), plot = last_plot(), width = 18, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_umap.png"), plot = last_plot(), width = 18, height = 18, units = "cm")
+
+# SCtransform embedding coloured by species
+DimPlot(sc_seurat.sct, reduction = "umap", group.by = "Species") +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix, "_Species_umap.pdf"), plot = last_plot(), width = 18, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", prefix, "_Species_umap.png"), plot = last_plot(), width = 18, height = 18, units = "cm")
+
+# SCtransform embedding coloured by species, split
+DimPlot(sc_seurat.sct, reduction = "umap", group.by = "Species", split.by = "Species") +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix, "_Species_split_umap.pdf"), plot = last_plot(), width = 35, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", prefix, "_Species_spit_umap.png"), plot = last_plot(), width = 35, height = 18, units = "cm")
+
+# SCtransform embedding coloured by clusters, split by species
+DimPlot(sc_seurat.sct, reduction = "umap", split.by = "Species") + 
+  NoLegend() +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_split_umap.pdf"), plot = last_plot(), width = 36, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_split_umap.png"), plot = last_plot(), width = 36, height = 18, units = "cm")
+
+# SCtransform embedding coloured by clusters, split by species
+DimPlot(sc_seurat.sct, reduction = "umap", split.by = "Stage") + 
+  NoLegend() +
+  coord_fixed(ratio = 1)  +
+  xlab("UMAP 1")+
+  ylab("UMAP 2")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_sample_split_umap.pdf"), plot = last_plot(), width = 56, height = 18, units = "cm")
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_sample_split_umap.png"), plot = last_plot(), width = 56, height = 18, units = "cm")
+
+
+# Clusters across samples
+clust.list <- SampleClusterPlot(obj = sc_seurat.sct, 
+                               metadata_column = "Stage", 
+                               order =TRUE)
+
+wrap_plots(clust.list, guides = 'collect', design = Layout) 
+ggsave(paste0(plotdir, "/", prefix, "_Cluster_sample_split_umap.pdf"), plot = last_plot(), width = 35, height = 20, units = "cm")
+ggsave(paste0(plotdir, "/", prefix,"_Cluster_sample_split_umap.png"), plot = last_plot(), width = 35, height = 20, units = "cm")
+rm(clust.list)
+
+```
+
+
+```{r dotplots}
+
+
+DefaultAssay(sc_seurat.sct) <- "SCT"
+
+
+markers.to.plot <- c("TOP2A","ID4", "HES5","BTG2",  "NEUROG2", "EOMES", "NEUROD1","PREX1","MEIS2","SATB2", "KCNQ5","CUX2", "RORB","FEZF2","SH3GL2","TLE4","NR4A2","PIEZO2","HS3ST2","PROX1", "NRP1", "NDST4", "NPSR1","NR3C2","TRPS1")
+
+DotPlot(sc_seurat.sct, 
+        features = markers.to.plot, cols = c("#00BFC4","#F8766D"), 
+        dot.scale = 8, split.by = "Species") +
+  RotatedAxis()
+  
+ggsave(paste0(plotdir, "/",prefix, "_dotplot_all_clust.pdf"), plot=last_plot(), width = 30, height = 20, units = "cm")
+ggsave(paste0(plotdir, "/",prefix,"_dotplot_all_clust.png"), plot=last_plot(), width = 30, height = 20, units = "cm")
+
+
+
+# species.diff.markers <- c("SOX11","SOX4","IGFBPL1","PLXNA4", "NEUROD6", "AUTS2","GRIA1","PLXNA2","EPHA3","SYT1","CDH10","FOXG1","NNAT")
+# 
+# DotPlot(subset(sc_seurat.sct, idents = c("AP I", "AP II", "GE AP", "Basal Progenitors", "Immature Neurons",  "Hippocampal Pyramids", "DSCAM/CNTNAP5", "NRP1/SEMA3C/NRP2", "DL neurons", "UL neurons")), features = species.diff.markers , cols = c("#00BFC4","#F8766D"), 
+#         dot.scale = 8, split.by = "Species") +
+#     RotatedAxis()
+# ggsave(paste0(plotdir, "/", prefix, "_dotplot_subset.pdf"), plot=last_plot(), width = 30, height = 20, units = "cm")
+# ggsave(paste0(plotdir, "/", prefix, "_dotplot_subset.png"), plot=last_plot(), width = 30, height = 20, units = "cm")
+
+
+
+```
+
+
+```{r expression plots}
+
+Gene.list <- unique(c(markers.to.plot, top10_percluster,
+                      "CACYBP", "EPHA4","SEMA3A","SEMA3C","PLXNA2","CNTN4"))
+
+plotdir <- "plots/Pyramid_Subset/Cluster Specific Genes"
+dir.create(plotdir)
+
+lapply(Gene.list, OutputFeatureBySample)
+lapply(Gene.list, OutputFeatureBySpecies)
+
+
+
+```
+
+
+```{r between_species_plots}
+# plan("sequential")
+# Idents(sc_seurat.sct) <- "Species"
+# Species.Differences <- FindMarkers(sc_seurat.sct, ident.1 = "Opossum", ident.2 = "Mouse")
+# write.table(Species.Differences, file= paste0(DEdir,"/","species_differences.csv"), sep = ",",quote = FALSE, row.names = FALSE)
+# library(ggrepel)
+# avg.cells <- as.data.frame(log1p(AverageExpression(sc_seurat.sct, verbose = FALSE)$SCT))
+# avg.cells$gene <- rownames(avg.cells)
+# # ggplot(avg.cells, aes(mouse, opossum))+
+# #   geom_point()+
+# #   geom_text_repel(label = ifelse(avg.cells$gene %in% avg.UL.cells$gene, 
+# #                                                       avg.cells$gene, ' '))
+# write.table(avg.cells, file =paste0(DEdir,"/","avg_gene_exp.csv"),sep = ",",quote = FALSE, row.names = FALSE)
+# 
+
+DefaultAssay(sc_seurat.sct) <- "SCT"
+
+sc_seurat.sct$celltype.species <- paste(Idents(sc_seurat.sct), sc_seurat.sct$Species, sep = " | ")
+sc_seurat.sct$celltype <- Idents(sc_seurat.sct)
+Idents(sc_seurat.sct) <- "celltype.species"
+
+
+ 
+sc_seurat.sct <- PrepSCTFindMarkers(sc_seurat.sct)
+DEdir <- "DE"
+dir.create(DEdir)
+
+
+# Function to output species different gene tables by cluster
+SpeciesDiffByCelltype <- function(celltype.list){
+  cl <- list()
+  for (celltype in celltype.list){
+    print(paste0("Finding Species Differences in ", celltype))
+    d <- FindMarkers(sc_seurat.sct, 
+                     ident.1 = paste0(celltype, " | Opossum"), 
+                     ident.2 = paste0(celltype, " | Mouse"),
+                     verbose = FALSE)
+    d <- cbind(celltype = celltype, gene =rownames(d), data.frame(d, row.names=NULL))
+    cl[[celltype]] <- d
+  }
+  celltype.df <- do.call(rbind, cl)
+  celltype.df <- data.frame(celltype.df, row.names = NULL)
+  assign(x = "Species_specific_by_cluster.df", value = celltype.df, envir = .GlobalEnv)
+  write.table(celltype.df, file = paste0(plotdir, "/", prefix,"_Species_specific_differences_per_cluster.csv"),sep=",", quote = FALSE, row.names = FALSE )
+}
+
+plotdir <- "plots/Pyramid_Subset/Species Differences by Celltype/All"
+dir.create(plotdir)
+
+celltype.list<- unique(sc_seurat.sct$celltype)
+
+# Call Species Difference function
+# Not Parallelized so it takes longer than it should
+SpeciesDiffByCelltype(celltype.list) 
+
+
+top_percluster.species <- Species_specific_by_cluster.df  %>% group_by(celltype) %>% slice_max(n = 10, order_by  = avg_log2FC) #Genes high in opossum
+
+bottom_percluster.species <- Species_specific_by_cluster.df  %>% group_by(celltype) %>% slice_min(n = 10, order_by = avg_log2FC) #Genes high in mouse
+
+
+Top.species <- unique(c(top_percluster.species$gene, bottom_percluster.species$gene, "EIF4A1","AUTS2","NRG1","SOX11","IGFBPL1","NEUROD6", "CNTN2","PCDH9","FRMD4B","MACROD2","TAFA2","CARMIL1","SOX5","GRIA1","MDGA2","SYT1","SPIRE1", "NELL1","CDH10","PLXNA2","EPHA3","LSAMP","RYR2","PCSK5", "CADPS","PLPPR5","RASA3","RSPO3","KCTD16","CNTN4","PAPPA2","SYT6","SYN2"))
+
+
+lapply(Top.species, OutputFeatureBySample)
+lapply(c("NEUROD2","NEUROD6"), OutputFeatureBySample)
+lapply(Top.species, OutputFeatureBySpecies)
+lapply(c("NEUROD2","NEUROD6"), OutputFeatureBySpecies)
+
+top_Immature.species <- subset(Species_specific_by_cluster.df, celltype == "Immature Neurons")  %>% group_by(celltype) %>% slice_max(n = 20, order_by = avg_log2FC) 
+bottom_Immature.species <- subset(Species_specific_by_cluster.df, celltype == "Immature Neurons")  %>% group_by(celltype) %>% slice_min(n = 20, order_by = avg_log2FC)
+
+top_L2.species <- subset(Species_specific_by_cluster.df, celltype == "Layer II/III")  %>% group_by(celltype) %>% slice_max(n = 20, order_by = avg_log2FC) 
+bottom_L2.species <- subset(Species_specific_by_cluster.df, celltype == "Layer II/III")  %>% group_by(celltype) %>% slice_min(n = 20, order_by = avg_log2FC)
+
+Top.species.SVZ.UL <- unique(c(top_L2.species$gene, bottom_L2.species$gene, top_Immature.species$gene, bottom_Immature.species$gene  ))
+
+plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/UL_and_Immature_Differences"
+dir.create(plotdir)
+
+lapply(Top.species.SVZ.UL , OutputFeatureBySpecies)
+lapply(Top.species.SVZ.UL , OutputFeatureBySample)
+
+sc_seurat.sct$celltype <- Idents(sc_seurat.sct)
+
+
+Violin_out <- function(gene){
+  VlnPlot(sc_seurat.sct,
+        features = gene,
+        split.by = "Species", group.by = "celltype",
+    pt.size = 0, combine = FALSE)
+  ggsave(paste0(plotdir, "/", gene, "_by_cluster_violin.pdf"), plot=last_plot(), width = 15, height = 10, units = "cm")
+  ggsave(paste0(plotdir, "/", gene, "_by_cluster_violin.png"), plot=last_plot(), width = 15, height = 10, units = "cm")
+}
+
+
+# High in mouse
+high.in.mouse <- c("DBI","SOX11","IGFBPL1", "EIF4A1","AUTS2","CNTN2","HS6ST3","HS3ST4","NRG1","PCDH9","FRMD4B","MACROD2","TAFA2")
+
+plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/Violin"
+dir.create(plotdir)
+plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/Violin/Up_in_mouse"
+dir.create(plotdir)
+
+lapply(high.in.mouse, Violin_out)
+
+plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/Violin/Up_in_opossum"
+dir.create(plotdir)
+
+#High in Opossum
+high.in.opossum <- c("SOX5","GRIA1","CNTN4","PLXNA2","EPHA3","SYT1","SYN2","CDH10","CARMIL1","LSAMP","RYR2","SPIRE1", "NELL1","PCSK5", "CADPS","PLPPR5","RASA3","RSPO3","KCTD16","MDGA2","PAPPA2")
+
+lapply(high.in.opossum, Violin_out)
+
+
+high.low <- c(high.in.mouse, high.in.opossum)
+high.low <- c("DBI","EIF4A1","AUTS2","NRG1","SOX11","IGFBPL1", "PCDH9","FRMD4B","MACROD2","TAFA2","CNTN2","HS6ST3","HS3ST4","CARMIL1","SOX5","GRIA1","MDGA2","SYT1","LSAMP","SPIRE1","PLXNA2","EPHA3", "CADPS","NELL1","CDH10","PLPPR5","RYR2","PCSK5", "RASA3","RSPO3","KCTD16","CNTN4","PAPPA2","SYN2")
+
+plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/Violin"
+
+V <- VlnPlot(sc_seurat.sct,
+         features = high.low,
+         split.by = "Species", group.by = "celltype", stack = TRUE, flip = TRUE, 
+         pt.size = 1, combine = FALSE)
+ggsave(paste0(plotdir, "/", "Species_differences_stacked_violin.pdf"), plot=V, width = 20, height = 30, units = "cm")
+ggsave(paste0(plotdir, "/", "Species_differences_stacked_violin.png"), plot=last_plot(), width = 20, height = 30, units = "cm")
+
+Idents(sc_seurat.sct)<-"celltype"
+DotPlot(sc_seurat.sct, 
+        features = high.low, cols = c("#00BFC4","#F8766D"), 
+        dot.scale = 8, split.by = "Species") +
+  RotatedAxis()
+  
+ggsave(paste0(plotdir, "/",prefix, "_dotplot_all_clust.pdf"), plot=last_plot(), width = 30, height = 20, units = "cm")
+ggsave(paste0(plotdir, "/",prefix,"_dotplot_all_clust.png"), plot=last_plot(), width = 30, height = 20, units = "cm")
+
+
+plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/heatmaps"
+dir.create(plotdir)
+
+# Calculate average expression per cell type
+cluster.averages <- AverageExpression(sc_seurat.sct)
+
+#Return this information as a Seurat object (enables downstream plotting and analysis) First,
+#replace spaces with underscores '_' so ggplot2 doesn't fail
+orig.levels <- levels(sc_seurat.sct)
+Idents(sc_seurat.sct) <- gsub(pattern = " ", replacement = "_", x = Idents(sc_seurat.sct))
+orig.levels <- gsub(pattern = " ", replacement = "_", x = orig.levels)
+levels(sc_seurat.sct) <- orig.levels
+
+cluster.averages <- AverageExpression(sc_seurat.sct, return.seurat = TRUE, group.by = "Species")
+cluster.averages
+
+
+CellScatter(cluster.averages, cell1 = "Layer_IV", cell2 = "Basal_Progenitors")
+DoHeatmap(cluster.averages, features = unlist(TopFeatures(sc_seurat.sct[["pca"]], balanced = TRUE)), size = 3, 
+    draw.lines = FALSE)
+
+
+cluster.averages.species <- AverageExpression(sc_seurat.sct, return.seurat = TRUE, add.ident = "Species")
+
+
+
+DoHeatmap(cluster.averages.species, features = unlist(TopFeatures(sc_seurat.sct[["pca"]], balanced = TRUE)), size = 3, 
+    draw.lines = FALSE)
+
+
+sc_seurat.sct$celltype_new <- factor(sc_seurat.sct@active.ident, levels = levels(sc_seurat.sct))
+
+
+cluster.averages.species.replicate <- AverageExpression(sc_seurat.sct, return.seurat = TRUE, group.by  =   c("celltype","Species"))
+
+DoHeatmap(cluster.averages.species.replicate, features = unlist(TopFeatures(sc_seurat.sct[["pca"]], balanced = TRUE)), size = 3, 
+    draw.lines = FALSE)
+
+DefaultAssay(sc_seurat.sct) <- "SCT"
+
+
+#all Cells
+VlnPlot(subset(sc_seurat.sct, celltype %in% c("Basal Progenitors","Immature Neurons")), features = c("BTG2", "EOMES","PAX6"), split.by = "Species")
+# averaged
+VlnPlot(cluster.averages.species.replicate, features = c("BTG2", "EOMES","PAX6"), split.by = "Stage")
+
+
+#HSSTs
+
+FeaturePlot(sc_seurat.sct, features = c("HS2ST1","HS3ST1","HS3ST2","HS3ST4","HS3ST5","HS3ST6","HS6ST1","HS6ST2","HS6ST3"), split.by="Species", order= TRUE, coord.fixed = TRUE, by.col = FALSE, ncol = 3)
+
+
+
+
+```
+
+
+```{r average_exp_by_species}
+
+
+
+cluster.averages.species.replicate <- AverageExpression(sc_seurat.sct,  return.seurat = TRUE, group.by =   c("celltype","Species","Stage"))
+
+species.df <- as.data.frame(log1p(AverageExpression(sc_seurat.sct, group.by = c("Species")$SCT))) 
+
+testvolcano<- ggplot(avg.UL.cells, aes(mouse, opossum)) + geom_point()
+
+
+UL.cells <- subset(sc_seurat.sct, idents = "UL neurons")
+Idents(UL.cells) <- "Species"
+avg.UL.cells <- as.data.frame(log1p(AverageExpression(UL.cells, verbose = FALSE)$SCT))
+avg.UL.cells$gene <- rownames(avg.UL.cells)
+genes.to.label = c("")
+
+ULscatter <- ggplot(avg.UL.cells, aes(mouse, opossum)) + geom_point() + ggtitle("Upper Layer Neurons")
+ULscatter <- LabelPoints(plot = ULscatter, points = genes.to.label, repel = TRUE)
+
+
+                                   
+
+ggplot(opossum.UL.differences, aes(x = avg_log2FC, y = -log10(p_val_adj))) + geom_point()
+
+
+
+
+
+```
