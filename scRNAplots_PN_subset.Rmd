@@ -9,6 +9,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 
+  
 ```{r load}
 library(dplyr)
 library(Seurat)
@@ -16,7 +17,7 @@ library(ggplot2)
 library(patchwork)
 library(glmGamPoi)
 library(future)
-setwd("~/Google Drive/My Drive/Bench/Opossum/scRNAseq/")
+#setwd("~/Google Drive/My Drive/Bench/Opossum/scRNAseq/")
 sc_seurat.sct <- readRDS("sc_seurat.PN.sct.rds")
 sc.markers <- read.csv("all_cluster_markers_PN_subset_res_0.3.csv", header = TRUE, sep=",")
 #sc_seurat.sct <- sc_seurat.PN.sct
