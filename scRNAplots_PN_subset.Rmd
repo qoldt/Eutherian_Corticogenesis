@@ -19,7 +19,7 @@ library(glmGamPoi)
 library(future)
 #setwd("~/Google Drive/My Drive/Bench/Opossum/scRNAseq/")
 sc_seurat.sct <- readRDS("sc_seurat.PN.sct.rds")
-sc.markers <- read.csv("all_cluster_markers_pn_subset_res_0.3.csv", header = TRUE, sep=",")
+sc.markers <- read.csv("all_cluster_markers_PN_subset_res_0.3.csv", header = TRUE, sep=",")
 #sc_seurat.sct <- sc_seurat.PN.sct
 
 sc_seurat.sct$Stage <- factor(sc_seurat.sct$Stage, levels = c("Mouse E14","Mouse E16", "Mouse E18","Opossum P10","Opossum P17", "Opossum P21"))
@@ -464,3 +464,120 @@ ggplot(opossum.UL.differences, aes(x = avg_log2FC, y = -log10(p_val_adj))) + geo
 
 
 ```
+
+
+# testing for changes in AP
+
+```{r}
+install.packages("tidyverse")
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(future)
+
+setwd("C:/Users/NOHA/OneDrive/Desktop/Lab Rotation")
+sc_seurat.sct <- readRDS("C:/Users/NOHA/OneDrive/Desktop/Lab Rotation/sc_seurat.PN.sct.rds")
+library(Seurat)
+# Idents(sc_seurat.sct) # if you want to see what is currently set as Ident
+# Need to rename cell identities to safe names
+sc_seurat.sct <- RenameIdents(sc_seurat.sct, `Apical Progenitors I` = "AP_I", `Apical Progenitors II` = "AP_II", `Apical Progenitors III` = "AP_III", `Basal Progenitors` = "BA", `Immature Neurons` = "IN", `Layer II/III` = "LII_III", `Layer IV` = "L_IV", `Layer VI` = "L_VI", `DL HS3ST2` = "DL_HS3ST2", `PIEZO2` = "PIEZO2", `Subiculum` = "SUB", `CA1 & DG` = "CA1_DG", `CA3` = "CA3")
+DimPlot(sc_seurat.sct, label = TRUE)
+sc_seurat.sct$celltype_species <-paste(Idents(sc_seurat.sct), sc_seurat.sct$Species, sep = "_")
+head (sc_seurat.sct,5)
+```
+
+
+
+```{r}
+#Apical Progenitors I (AP_I)
+
+#for Apical progenitors I in both Opossum and Mouse. 
+#they aren't arranged yet. 
+sc_seurat.sct <- PrepSCTFindMarkers(sc_seurat.sct)
+Idents(sc_seurat.sct) <- "celltype_species"
+Idents(sc_seurat.sct)
+AP_I_markers <- FindMarkers(sc_seurat.sct, assay = "SCT", ident.1= "AP_I_Opossum", ident.2= "AP_I_Mouse", verbose = FALSE)
+head (AP_I_markers, n = 20)
+AP_I_markers$gene <- rownames(AP_I_markers)
+
+#to define the top 25 highly expressed genes in Opossum (slice_max means the highly expressed in the ident.1). In other words, the +ve values indicate that feature is more/highly expressed in the first group (here is Opossum)
+top.25.highly.expressed.in.opossum.API <- AP_I_markers  %>% slice_max(n = 25, order_by = avg_log2FC)
+top.25.highly.expressed.in.opossum.API
+
+#to define the top 25 highly expressed genes in Mouse (slice_min means the highly expressed in the ident.2). In other words, the -ve values indicate that feature is more/highly expressed in the second group (here is Mouse)
+top.25.highly.expressed.in.mouse.API <- AP_I_markers %>% slice_min(n = 25, order_by = avg_log2FC)
+top.25.highly.expressed.in.mouse.API
+
+#rbind to combine the top 25 selected in the opossum and the top 25 selected in mouse, you will get a list of 50 genes that are highly expressed in opossum (+ve values) and expressed in mouse (-ve values). 
+top.50.AP_I <- rbind(top.25.highly.expressed.in.opossum.API, top.25.highly.expressed.in.mouse.API)
+top.50.AP_I
+```
+
+```{r}
+#Apical Progenitors II (AP_II)
+
+#for Apical progenitors II in both Opossum and Mouse. 
+#they aren't arranged yet. 
+sc_seurat.sct <- PrepSCTFindMarkers(sc_seurat.sct)
+Idents(sc_seurat.sct) <- "celltype_species"
+Idents(sc_seurat.sct)
+AP_II_markers <- FindMarkers(sc_seurat.sct, assay = "SCT", ident.1= "AP_II_Opossum", ident.2= "AP_II_Mouse", verbose = FALSE)
+head (AP_II_markers, n = 20)
+AP_II_markers$gene <- rownames(AP_II_markers)
+
+#to define the top 25 highly expressed genes in Opossum (slice_max means the highly expressed in the ident.1). In other words, the +ve values indicate that feature is more/highly expressed in the first group (here is Opossum)
+top.25.highly.expressed.in.opossum.APII <- AP_II_markers  %>% slice_max(n = 25, order_by = avg_log2FC)
+top.25.highly.expressed.in.opossum.APII
+
+#to define the top 25 highly expressed genes in Mouse (slice_min means the highly expressed in the ident.2). In other words, the -ve values indicate that feature is more/highly expressed in the second group (here is Mouse)
+top.25.highly.expressed.in.mouse.APII <- AP_II_markers %>% slice_min(n = 25, order_by = avg_log2FC)
+top.25.highly.expressed.in.mouse.APII
+
+#rbind to combine the top 25 selected in the opossum and the top 25 selected in mouse, you will get a list of 50 genes that are highly expressed in opossum (+ve values) and expressed in mouse (-ve values). 
+top.50.AP_II <- rbind(top.25.highly.expressed.in.opossum.APII, top.25.highly.expressed.in.mouse.APII)
+top.50.AP_II
+```
+
+
+```{r}
+#Apical Progenitors III (AP_III)
+
+#for Apical progenitors III in both Opossum and Mouse. 
+#they aren't arranged yet. 
+sc_seurat.sct <- PrepSCTFindMarkers(sc_seurat.sct)
+Idents(sc_seurat.sct) <- "celltype_species"
+Idents(sc_seurat.sct)
+AP_III_markers <- FindMarkers(sc_seurat.sct, assay = "SCT", ident.1= "AP_III_Opossum", ident.2= "AP_III_Mouse", verbose = FALSE)
+head (AP_III_markers, n = 20)
+AP_III_markers$gene <- rownames(AP_III_markers)
+
+
+#to define the top 25 highly expressed genes in Opossum (slice_max means the highly expressed in the ident.1). In other words, the +ve values indicate that feature is more/highly expressed in the first group (here is Opossum)
+top.25.highly.expressed.in.opossum.APIII <- AP_III_markers  %>% slice_max(n = 25, order_by = avg_log2FC)
+top.25.highly.expressed.in.opossum.APIII
+
+
+#to define the top 25 highly expressed genes in Mouse (slice_min means the highly expressed in the ident.2). In other words, the -ve values indicate that feature is more/highly expressed in the second group (here is Mouse)
+top.25.highly.expressed.in.mouse.APIII <- AP_III_markers  %>% slice_min(n = 25, order_by = avg_log2FC)
+top.25.highly.expressed.in.mouse.APIII
+
+
+#rbind to combine the top 25 selected in the opossum and the top 25 selected in mouse, you will get a list of 50 genes that are highly expressed in opossum (+ve values) and expressed in mouse (-ve values). 
+top.50.AP_III <- rbind(top.25.highly.expressed.in.opossum.APIII, top.25.highly.expressed.in.mouse.APIII)
+top.50.AP_III
+```
+
+
+```{r}
+# For all AP markers
+sc_seurat.sct <- PrepSCTFindMarkers(sc_seurat.sct)
+Idents(sc_seurat.sct) <- "celltype_species"
+Idents(sc_seurat.sct)
+AP_all_markers <- FindMarkers(sc_seurat.sct, assay = "SCT", ident.1= c ("AP_I_Opossum", "AP_II_Opossum", "AP_III_Opossum"), ident.2= c("AP_I_Mouse", "AP_II_Mouse", "AP_III_Mouse"), verbose = FALSE)
+head (AP_all_markers, n = 20)
+```
+
+
+
+
