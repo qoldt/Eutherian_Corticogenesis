@@ -579,5 +579,14 @@ head (AP_all_markers, n = 20)
 ```
 
 
+```{r}
+# these genes are selected based on the following criteria: 
+#1. pct.1 or pct.2 DON'T = 0.
+#2. the difference between pct.1 and pct.2 at least = 0.3 (less than that, you hardly can see the differences in the gene expression)
+
+FeaturePlot (sc_seurat.sct,features= "ID4", split.by = "Species")
+```
+
+
 
 
