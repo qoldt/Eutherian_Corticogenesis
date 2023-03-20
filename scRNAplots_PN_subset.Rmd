@@ -590,3 +590,100 @@ FeaturePlot (sc_seurat.sct,features= "ID4", split.by = "Species")
 
 
 
+
+
+
+#GO, QUESTIONS: 
+```{r}
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(glmGamPoi)
+library(future)
+library (AnnotationDbi)
+library (clusterProfiler)
+library(enrichplot)
+
+
+sc_seurat.sct = read.csv("C:/Users/NOHA/OneDrive/Desktop/Lab Rotation/all_cluster_markers_PN_subset_res_0.3.csv", header=TRUE)
+library (dplyr)
+
+#for this step it should give me a vector with the avg_log2FC only (numeric one), I tried to select both the avg_log2FC and the gene to get a vector with 2 columns, but it didn't work, the reason why I'm trying to do that is to get a genes names to be mapped.  
+sc.markers <- sc_seurat.sct$avg_log2FC
+
+names(sc.markers) <- sc_seurat.sct$markers
+gene_list<-na.omit(sc.markers)
+gene_list = sort(gene_list, decreasing = TRUE)
+```
+
+
+
+
+```{r}
+#for mouse database
+orgainsm = "org.Mm.eg.db"
+#BiocManager::install(organism, character.only = TRUE)
+library(orgainsm, character.only = TRUE)
+
+#for opossum database
+organism2 = "org.Md.eg.db"
+```
+
+
+
+```{r}
+keytypes(org.Mm.eg.db)
+```
+
+
+
+```{r}
+#the result here will be (there's no gene can be mapped). Also, I changed the keyType many times but the same error. 
+library(org.Mm.eg.db)
+gse <- gseGO(geneList=gene_list, 
+             ont ="ALL", 
+             keyType = "ENSEMBL", 
+             nPerm = 10000, 
+             minGSSize = 3, 
+             maxGSSize = 800, 
+             pvalueCutoff = 0.05, 
+             verbose = TRUE, 
+             OrgDb = org.Mm.eg.db, 
+             pAdjustMethod = "none")
+```
+
+
+
+```{r}
+#Dr. Andrew's code 
+
+library (AnnotationDbi)
+library(TxDb.Mmusculus.UCSC.mm10.knownGene)
+library(EnsDb.Mmusculus.v79)
+library(org.Mm.eg.db)
+
+Togaram1KO.BP <- enrichGO(gene = gene_list, 
+                      keyType = "ENTREZID", 
+                      OrgDb = org.Mm.eg.db, 
+                      ont = "BP", 
+                      pAdjustMethod = "BH", 
+                      qvalueCutoff = 0.05, 
+                      readable = TRUE)
+
+#for this one is didn't work howvere the pervious code worked!
+Togaram1KO.BP.dot <- dotplot(Togaram1KO.BP, size = showCategory=20)
+
+compKEGG <- compareCluster(geneCluster = gene_list, 
+                           fun = "enrichGO",
+                           #organism = "mouse",
+                           pvalueCutoff  = 0.01, 
+                           OrgDb = org.Mm.eg.db,
+                           pAdjustMethod = "BH")
+#this one kept running for a long time and there is no result 
+
+dotplot(compKEGG, showCategory = 30, title = "GO Enrichment Analysis")
+ego2 <- simplify(compKEGG)
+cnetplot(ego2)
+```
+
