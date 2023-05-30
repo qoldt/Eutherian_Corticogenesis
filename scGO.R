@@ -45,8 +45,6 @@ perform_go_analysis <- function(data, celltype, ontology) {
   # Filter data for the current celltype
   cell_data <- data[data$celltype == celltype, ]
   
-
-
   cat("Celltype:", celltype, "\n")
   cat("Number of unique genes:", length(unique(cell_data$gene)), "\n")
   cat("Total number of genes:", nrow(cell_data), "\n")
@@ -55,13 +53,15 @@ perform_go_analysis <- function(data, celltype, ontology) {
   # Convert gene symbols to Entrez IDs
   #entrez_ids <- mapIds(org.Mm.eg.db, keys = cell_data$gene, column = "ENTREZID", keytype = "SYMBOL", multiVals = "first")
   
-
+  log2_fc <- cell_data$avg_log2FC 
   
   # Create a named vector of log2 fold changes with Entrez IDs as names
   names(log2_fc) <- cell_data$gene
   
   # Sort the log2_fc vector in decreasing order
   log2_fc <- sort(log2_fc, decreasing = TRUE)
+  
+
   
   #remove any NA gene 
   log2_fc <- na.omit(log2_fc)
