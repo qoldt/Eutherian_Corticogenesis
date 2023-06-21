@@ -18,7 +18,7 @@ library(patchwork)
 library(glmGamPoi)
 library(future)
 #setwd("~/Google Drive/My Drive/Bench/Opossum/scRNAseq/")
-sc_seurat.sct <- readRDS("sc_seurat.PN.sct.rds")
+sc_seurat.sct <- readRDS("~/My Drive/Bench/Opossum/scRNAseq/sc_seurat.PN.sct.rds")
 sc.markers <- read.csv("all_cluster_markers_PN_subset_res_0.3.csv", header = TRUE, sep=",")
 #sc_seurat.sct <- sc_seurat.PN.sct
 
@@ -345,6 +345,21 @@ plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/Violin/Up_in_mo
 dir.create(plotdir)
 
 lapply(high.in.mouse, Violin_out)
+
+translation <- toupper(c("MACROD2","Rps29","Eef1a1","Rpl13a","Rps4x","Rpl37","Rps24","Rps27","Eef2","Eef1g","Eif4g2","Eif3f","Trim2","Npm1","Eif5a","Rack1","Eef1b2","Eif3k","Btg2","Ndufa7","Eif5","Zfp706","Eif2s2","Tmed2","Eif5b","Eif1b"))
+
+plotdir <- "~/My Drive/Bench/Opossum/scRNAseq/plots/Pyramid_Subset/Species_Differences_by_Celltype/Violin/translation"
+dir.create(plotdir)
+
+V <- VlnPlot(sc_seurat.sct,
+         features = translation,
+         split.by = "Species", group.by = "celltype", stack = TRUE, flip = TRUE, 
+         pt.size = 1, combine = FALSE)
+ggsave(paste0(plotdir, "/", "Species_differences_stacked_violin_translation.pdf"), plot=V, width = 20, height = 30, units = "cm")
+ggsave(paste0(plotdir, "/", "Species_differences_stacked_translation.png"), plot=last_plot(), width = 20, height = 30, units = "cm")
+
+
+
 
 plotdir <- "plots/Pyramid_Subset/Species_Differences_by_Celltype/Violin/Up_in_opossum"
 dir.create(plotdir)
