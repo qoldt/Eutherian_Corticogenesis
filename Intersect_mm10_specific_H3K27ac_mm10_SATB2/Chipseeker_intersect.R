@@ -14,6 +14,10 @@ BiocManager::install("clusterProfiler")
 BiocManager::install("AnnotationDbi")
 BiocManager::install("biomaRt")
 BiocManager::install("HDO.db")
+BiocManager::install("regioneR")
+BiocManager::install("BSgenome.Mmusculus.UCSC.mm10") # used by RegioneR
+BiocManager::install("BSgenome.Mmusculus.UCSC.mm10.masked")
+BiocManager::install("rtracklayer")
 
 library(ChIPseeker)
 library(clusterProfiler)
@@ -24,7 +28,12 @@ library(org.Mm.eg.db)
 library(biomaRt)
 library(dplyr)
 library(ggimage)
-
+library(regioneR)
+library(BSgenome.Mmusculus.UCSC.mm10)
+library(BSgenome.Mmusculus.UCSC.mm10.masked)
+library(rtracklayer)
+library(RColorBrewer)
+library(ggrepel)
 
 samplefiles <-
   list.files("peak_files", pattern = ".bed", full.names = TRUE)
@@ -48,7 +57,6 @@ samplefiles <-
     "Mouse_H3K27ac",
     "Opossum_H3K27ac"
   )]
-# samplefiles <- samplefiles[c("Mouse_SATB2", "Intersect_Mouse_Specific_H3K27ac_Mouse_SATB2")]
 
 # Peak annotation
 
@@ -70,7 +78,7 @@ compKEGG <- compareCluster(
   fun = "enrichKEGG",
   organism = "mouse",
   pvalueCutoff = 0.1,
-  # OrgDb = org.Mm.eg.db,
+  #OrgDb = org.Mm.eg.db,
   pAdjustMethod = "BH"
 )
 
@@ -78,12 +86,8 @@ dotplot(
   compKEGG,
   showCategory = 7,
   font.size = 8,
-  title = "GO Enrichment Analysis"
+  title = "KEGG Enrichment Analysis"
 )
-
-# If use fun = "enrichGO"
-# ego2 <- simplify(compKEGG)
-# cnetplot(ego2)
 
 # Extract genes ID of the desired/dominant enrichment class
 
@@ -139,8 +143,7 @@ H3K27ac_SATB2_intersect_major_class <-
   subset(H3K27ac_SATB2_intersect, geneId %in% genes_in_major_class[[1]])
 
 # To export
-# write.csv(H3K27ac_SATB2_intersect_major_class, "hippo_pathway_genes.csv", row.names=FALSE)
-
+# write.table(H3K27ac_SATB2_intersect_major_class, "GO_transcription_coregulator_genes.csv", row.names=FALSE, sep=";")
 
 # Extract genes for enrichGO
 
@@ -255,3 +258,107 @@ plotDistToTSS(peakAnnoList, title = "Distribution of transcription factor-bindin
 peak <-
   readPeakFile("peak_files/mouse_specific_H3K27ac_peaks_mm10.bed")
 covplot(peak, weightCol = "V5", lower = 200)
+
+
+##################### Permutation test ###################################
+
+
+getGenomeAndMask("mm10")
+
+SATB2_peaks <- import("peak_files/GSE222608_Peaks_SATB2_sorted.bed", format="BED")
+
+# not a normal bed file because of extra data so select the 3 first useful columns
+tmp <- read.table("peak_files/mouse_specific_H3K27ac_peaks_mm10.bed")
+Mouse_specific_peaks <- GRanges(tmp[,1], IRanges(tmp[,2], tmp[,3]))
+
+# Filter to have only canonical
+SATB2_peaks <- filterChromosomes(SATB2_peaks, organism = "mm10", chr.type ="canonical")
+Mouse_specific_peaks <- filterChromosomes(Mouse_specific_peaks, organism = "mm10", chr.type ="canonical")
+
+len_SATB2_peaks <- length(SATB2_peaks) ; len_SATB2_peaks
+len_Mouse_specific_peaks <- length(Mouse_specific_peaks) ; len_Mouse_specific_peaks
+
+# Permutation test
+intersect_analysis <- overlapPermTest(A=Mouse_specific_peaks, B=SATB2_peaks, ntimes=500, genome="mm10", count.once=TRUE, mask=NA)
+intersect_analysis
+plot(intersect_analysis, ylim=c(0,0.08))
+intersect_analysis$numOverlaps$observed/len_Mouse_specific_peaks # proportion of overlapping peaks
+pvalue_specific <- intersect_analysis$numOverlaps$pval
+
+# Odds ratio
+
+random_overlap_nb_specific <- mean(intersect_analysis$numOverlaps$permuted) 
+observed_overlap_nb_specific <- intersect_analysis$numOverlaps$observed
+random_nonoverlap_nb_specific <- len_Mouse_specific_peaks-random_overlap_nb_specific
+observed_nonoverlap_nb_specific <- len_Mouse_specific_peaks-observed_overlap_nb_specific
+
+OR_specific = (observed_overlap_nb_specific/random_overlap_nb_specific)/(observed_nonoverlap_nb_specific/random_nonoverlap_nb_specific)
+log(OR_specific)
+
+# Zscore when Mouse specific peaks are shifted
+lz_intersect_analysis_local <- localZScore(A=Mouse_specific_peaks, B=SATB2_peaks, pt=intersect_analysis, window=1000, step=500, count.once=TRUE)
+plot(lz_intersect_analysis_local)
+
+# We can see a broader effect which might not be correlated to SATB2
+lz_intersect_analysis_regional <- localZScore(A=Mouse_specific_peaks, B=SATB2_peaks, pt=intersect_analysis, window=10000, step=5000, count.once=TRUE)
+plot(lz_intersect_analysis_regional)
+
+# SATB2 overlap analysis with all mouse and opossum peaks
+tmp <- read.table("peak_files/mouse.H3K27ac_peaks.bed")
+Mouse_H3K27ac_peaks <- GRanges(tmp[,1], IRanges(tmp[,2], tmp[,3]))
+Opossum_H3K27ac_peaks <- import("peak_files/opossum_H3K27ac_peaks.merged.bed", format="BED")
+
+Mouse_H3K27ac_peaks <- filterChromosomes(Mouse_H3K27ac_peaks, organism = "mm10", chr.type ="canonical")
+Opossum_H3K27ac_peaks <- filterChromosomes(Opossum_H3K27ac_peaks, organism = "mm10", chr.type ="canonical")
+
+len_Mouse_H3K27ac_peaks <- length(Mouse_H3K27ac_peaks)
+len_Opossum_H3K27ac_peaks <- length(Opossum_H3K27ac_peaks)
+
+Mouse_H3K27ac_SATB2_analysis <- overlapPermTest(A=Mouse_H3K27ac_peaks, B=SATB2_peaks, ntimes=500, genome="mm10", count.once=TRUE, mask=NA)
+Mouse_H3K27ac_SATB2_analysis
+plot(Mouse_H3K27ac_SATB2_analysis, ylim=c(0,0.08))
+Mouse_H3K27ac_SATB2_analysis$numOverlaps$observed/len_Mouse_H3K27ac_peaks
+pvalue_all <- Mouse_H3K27ac_SATB2_analysis$numOverlaps$pval
+
+random_overlap_nb_all <- mean(Mouse_H3K27ac_SATB2_analysis$numOverlaps$permuted)
+observed_overlap_nb_all <- Mouse_H3K27ac_SATB2_analysis$numOverlaps$observed
+random_nonoverlap_nb_all <- len_Mouse_H3K27ac_peaks-random_overlap_nb_all
+observed_nonoverlap_nb_all <- len_Mouse_H3K27ac_peaks-observed_overlap_nb_all
+
+OR_all = (observed_overlap_nb_all/random_overlap_nb_all)/(observed_nonoverlap_nb_all/random_nonoverlap_nb_all)
+log(OR_all)
+
+Opossum_H3K27ac_SATB2_analysis <- overlapPermTest(A=Opossum_H3K27ac_peaks, B=SATB2_peaks, ntimes=500, genome="mm10", count.once=TRUE, mask=NA)
+Opossum_H3K27ac_SATB2_analysis
+plot(Opossum_H3K27ac_SATB2_analysis, ylim=c(0,0.08))
+Opossum_H3K27ac_SATB2_analysis$numOverlaps$observed/len_Opossum_H3K27ac_peaks
+pvalue_opossum <- Opossum_H3K27ac_SATB2_analysis$numOverlaps$pval
+
+random_overlap_nb_opossum <- mean(Opossum_H3K27ac_SATB2_analysis$numOverlaps$permuted)
+observed_overlap_nb_opossum <- Opossum_H3K27ac_SATB2_analysis$numOverlaps$observed
+random_nonoverlap_nb_opossum <- len_Opossum_H3K27ac_peaks-random_overlap_nb_opossum
+observed_nonoverlap_nb_opossum <- len_Opossum_H3K27ac_peaks-observed_overlap_nb_opossum
+
+OR_opossum = (observed_overlap_nb_opossum/random_overlap_nb_opossum)/(observed_nonoverlap_nb_opossum/random_nonoverlap_nb_opossum)
+log(OR_opossum)
+
+odds_ratio <- c(OR_specific, OR_all, OR_opossum)
+feature <- c('Mouse_Specific_H3K27ac', 'Mouse_H3K27ac', 'Opossum_H3K27ac')
+pval <- c(pvalue_specific, pvalue_all, pvalue_opossum)
+df <- data.frame(feature, odds_ratio, pval)
+
+##### plot
+
+x_max <- max(abs(log(df$odds_ratio)), na.rm = TRUE)
+
+ggplot(df, aes(log(odds_ratio), feature, size = pval)) +
+  geom_point(aes(color = feature)) + 
+  labs(y = 'Tested dataset', 
+       x = 'log(odds ratio)') +
+  geom_vline(xintercept = 0) +
+  xlim(c(-x_max - 0.5, x_max + 0.5)) +
+  theme_bw() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(), 
+        panel.grid.major.y = element_line(linetype = 3, linewidth = 1.2))
+
